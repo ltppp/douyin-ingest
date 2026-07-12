@@ -1,0 +1,26 @@
+.venv/
+.DS_Store
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+build/
+dist/
+*.log
+
+storage/*
+!storage/.gitkeep
+output/*
+!output/.gitkeep
+logs/*
+!logs/.gitkeep
+
+models/
+
+# Local research notes; not part of the public release.
+douyin-audio-workflow-plan.md
