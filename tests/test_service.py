@@ -11,13 +11,142 @@ from project.capture import CaptureError
 from project.config import Settings
 from project.models import (
     CapturedEndpoint,
+    CapturedVideo,
     CollectedWorks,
     CrawlResult,
     PaginationDescriptor,
+    ResolvedTarget,
     UserProfile,
     Video,
 )
 from project.service import DouyinCrawlerService
+
+
+@pytest.mark.asyncio
+async def test_service_collects_only_resolved_single_video(tmp_path, monkeypatch) -> None:
+    settings = Settings(
+        storage_state_path=tmp_path / "state.json",
+        output_path=tmp_path / "result.json",
+        debug_dir=tmp_path / "debug",
+        log_path=tmp_path / "crawler.log",
+    )
+    raw_item = {
+        "aweme_id": "7637452863689461026",
+        "desc": "单视频",
+        "statistics": {"digg_count": 48},
+        "author": {"nickname": "小道叫麻瓜", "sec_uid": "author-sec-id"},
+        "video": {"play_addr": {"url_list": ["https://video.test/single.mp4"]}},
+    }
+    capture_calls: list[tuple[str, str, bool, bool]] = []
+
+    class FakeCapture:
+        def __init__(self, settings, *, debug=False) -> None:
+            pass
+
+        async def capture(self, user_url, *, force_login=False):
+            raise AssertionError("profile collection must not run for a video target")
+
+        async def capture_video(
+            self, video_url, aweme_id, *, force_login=False, anonymous=False
+        ):
+            capture_calls.append((video_url, aweme_id, force_login, anonymous))
+            return CapturedVideo(
+                url=video_url,
+                item=raw_item,
+                headers={"user-agent": "test-agent"},
+            )
+
+    async def fake_resolve(value, request_timeout=15.0):
+        return ResolvedTarget(
+            mode="single_video",
+            url="https://www.douyin.com/video/7637452863689461026",
+            target_id="7637452863689461026",
+        )
+
+    monkeypatch.setattr(service_module, "NetworkCapture", FakeCapture)
+    monkeypatch.setattr(service_module, "resolve_target", fake_resolve)
+
+    result = await DouyinCrawlerService(settings).crawl("short-video", top_limit=10)
+
+    assert capture_calls == [
+        (
+            "https://www.douyin.com/video/7637452863689461026",
+            "7637452863689461026",
+            False,
+            True,
+        )
+    ]
+    assert result.collection_mode == "single_video"
+    assert result.source_url == "https://www.douyin.com/video/7637452863689461026"
+    assert result.total_works == 1
+    assert result.selection_limit == 1
+    assert [video.aweme_id for video in result.videos] == ["7637452863689461026"]
+    assert result.user.nickname == "小道叫麻瓜"
+    assert result.download_headers["User-Agent"] == "test-agent"
+
+
+@pytest.mark.asyncio
+async def test_single_video_falls_back_to_saved_state_after_anonymous_failure(
+    tmp_path, monkeypatch
+) -> None:
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "cookies": [
+                    {
+                        "name": "sessionid",
+                        "value": "saved",
+                        "domain": ".douyin.com",
+                        "expires": time() + 3600,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    settings = Settings(
+        browser_headless=True,
+        storage_state_path=state_path,
+        output_path=tmp_path / "result.json",
+        debug_dir=tmp_path / "debug",
+        log_path=tmp_path / "crawler.log",
+    )
+    attempts: list[tuple[bool, bool]] = []
+
+    class FakeCapture:
+        def __init__(self, settings, *, debug=False) -> None:
+            pass
+
+        async def capture_video(
+            self, video_url, aweme_id, *, force_login=False, anonymous=False
+        ):
+            attempts.append((force_login, anonymous))
+            if anonymous:
+                raise CaptureError("anonymous blocked")
+            return CapturedVideo(
+                url=video_url,
+                item={
+                    "aweme_id": aweme_id,
+                    "author": {"nickname": "作者", "sec_uid": "author"},
+                    "video": {"play_addr": {"url_list": ["https://video.test/one.mp4"]}},
+                },
+            )
+
+    async def fake_resolve(value, request_timeout=15.0):
+        return ResolvedTarget(
+            mode="single_video",
+            url="https://www.douyin.com/video/1",
+            target_id="1",
+        )
+
+    monkeypatch.setattr(service_module, "NetworkCapture", FakeCapture)
+    monkeypatch.setattr(service_module, "resolve_target", fake_resolve)
+
+    result = await DouyinCrawlerService(settings).crawl("short-video")
+
+    assert attempts == [(False, True), (False, False)]
+    assert result.collection_mode == "single_video"
 
 
 @pytest.mark.asyncio
@@ -72,11 +201,15 @@ async def test_retries_once_with_forced_login_for_stale_saved_state(tmp_path, mo
             return CollectedWorks(items=[], total_count=0)
 
     async def fake_resolve(value, request_timeout=15.0):
-        return "https://www.douyin.com/user/user"
+        return ResolvedTarget(
+            mode="profile",
+            url="https://www.douyin.com/user/user",
+            target_id="user",
+        )
 
     monkeypatch.setattr(service_module, "NetworkCapture", FakeCapture)
     monkeypatch.setattr(service_module, "DouyinApiClient", FakeApiClient)
-    monkeypatch.setattr(service_module, "resolve_user_url", fake_resolve)
+    monkeypatch.setattr(service_module, "resolve_target", fake_resolve)
 
     result = await DouyinCrawlerService(settings).crawl("short-url")
 

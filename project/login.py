@@ -36,9 +36,10 @@ async def create_authenticated_context(
     settings: Settings,
     *,
     force_login: bool = False,
+    allow_anonymous: bool = False,
 ) -> BrowserContext:
     state_path = settings.storage_state_path
-    use_saved_state = not force_login and storage_state_has_session(
+    use_saved_state = not force_login and not allow_anonymous and storage_state_has_session(
         state_path, settings.auth_cookie_names
     )
     try:
@@ -52,6 +53,10 @@ async def create_authenticated_context(
 
     if use_saved_state:
         logger.info("已加载登录状态: {}", state_path)
+        return context
+
+    if allow_anonymous and not force_login:
+        logger.info("没有有效登录状态，将先尝试匿名访问单视频页面")
         return context
 
     if settings.browser_headless:

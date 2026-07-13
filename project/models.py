@@ -29,6 +29,12 @@ class PaginationDescriptor(BaseModel):
     cursor_query_key: str | None = None
 
 
+class ResolvedTarget(BaseModel):
+    mode: Literal["profile", "single_video"]
+    url: str
+    target_id: str
+
+
 class UserProfile(BaseModel):
     nickname: str
     sec_user_id: str
@@ -45,6 +51,12 @@ class CapturedEndpoint(BaseModel):
     signature_query_keys: tuple[str, ...] = ()
     response_sample: JsonObject = Field(default_factory=dict)
     user_hint: UserProfile | None = None
+
+
+class CapturedVideo(BaseModel):
+    url: str
+    item: JsonObject
+    headers: dict[str, str] = Field(default_factory=dict)
 
 
 class RawPage(BaseModel):
@@ -99,6 +111,7 @@ class Video(BaseModel):
 
 class CrawlResult(BaseModel):
     source_url: str
+    collection_mode: Literal["profile", "single_video"] = "profile"
     user: UserProfile
     total_works: int
     top1: Video | None = None
@@ -135,6 +148,7 @@ class AgentVideo(BaseModel):
 class AgentSuccessOutput(BaseModel):
     schema_version: str = "1.0"
     ok: Literal[True] = True
+    collection_mode: Literal["profile", "single_video"] = "profile"
     user: UserProfile
     total_works: int
     returned_videos: int

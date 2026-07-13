@@ -1,6 +1,6 @@
 ---
 name: douyin-content-ingest
-description: Use when a user asks to work from an 抖音/Douyin user profile, account, or account-share link by analyzing it, retrieving most-liked Top N videos, downloading speech audio, generating raw transcripts, or preparing content-analysis material. Do not use for one-off single-video downloads, generic audio transcription, or non-Douyin platforms.
+description: Use when a user asks to work from an 抖音/Douyin profile or single-video link by collecting metadata, retrieving profile Top N videos, downloading speech audio, generating raw transcripts, or preparing content-analysis material. Do not use for generic local audio transcription or non-Douyin platforms.
 ---
 
 # Douyin Content Ingest
@@ -13,7 +13,7 @@ Orchestrate the installed `douyin-*` commands. Use repository `.venv/bin/` equiv
 2. Choose login mode:
    - Valid saved login: add `--headless`.
    - Missing/invalid login: first try the intended command with `--headless` and no `--refresh`; a valid cache can succeed without login. If it fails for authentication, confirm the user can scan a QR code, retry without `--headless`, and wait. If no user is available, stop and provide the exact headed command. Never read or display the storage-state file.
-3. Choose the smallest command matching the request. Use Top 10 when N is unspecified.
+3. Choose the smallest command matching the request. The CLI detects profile versus single video automatically. Use Top 10 for profiles when N is unspecified; single-video targets always return one item.
    - Metadata: `douyin-crawl URL --json --limit N`
    - Speech audio: add `--speech-audio-dir output/speech_audio`
    - Raw transcripts: add `--transcribe`; it reuses or creates speech audio.

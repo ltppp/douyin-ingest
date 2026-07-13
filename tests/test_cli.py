@@ -114,6 +114,44 @@ async def test_json_mode_keeps_stdout_machine_readable(tmp_path, monkeypatch, ca
 
 
 @pytest.mark.asyncio
+async def test_json_mode_reports_single_video_collection(tmp_path, monkeypatch, capsys) -> None:
+    settings = Settings(
+        output_path=tmp_path / "result.json",
+        storage_state_path=tmp_path / "state.json",
+        debug_dir=tmp_path / "debug",
+        log_path=tmp_path / "crawler.log",
+    )
+    video = Video(aweme_id="7637452863689461026", title="单视频", digg_count=48)
+    result = CrawlResult(
+        source_url="https://www.douyin.com/video/7637452863689461026",
+        collection_mode="single_video",
+        user=UserProfile(nickname="作者", sec_user_id="author"),
+        total_works=1,
+        top1=video,
+        top10=[video],
+        videos=[video],
+        selection_limit=1,
+        crawled_at=datetime.now(UTC),
+    )
+
+    async def fake_crawl(self, user_input, **kwargs):
+        return result
+
+    monkeypatch.setattr(cli_module, "create_settings", lambda args: settings)
+    monkeypatch.setattr(cli_module.DouyinCrawlerService, "crawl", fake_crawl)
+    args = build_argument_parser().parse_args(
+        ["https://www.douyin.com/video/7637452863689461026", "--json"]
+    )
+
+    assert await execute(args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["collection_mode"] == "single_video"
+    assert payload["returned_videos"] == 1
+    assert payload["selection_limit"] == 1
+    assert payload["videos"][0]["aweme_id"] == "7637452863689461026"
+
+
+@pytest.mark.asyncio
 async def test_json_mode_emits_structured_error(tmp_path, monkeypatch, capsys) -> None:
     settings = Settings(
         output_path=tmp_path / "result.json",

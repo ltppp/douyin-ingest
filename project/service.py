@@ -9,9 +9,15 @@ from project.cache import load_cached_result
 from project.capture import CaptureError, NetworkCapture
 from project.config import Settings
 from project.login import storage_state_has_session
-from project.models import CapturedEndpoint, CollectedWorks, CrawlResult
-from project.parser import build_result, save_result
-from project.utils import resolve_user_url
+from project.models import (
+    CapturedEndpoint,
+    CapturedVideo,
+    CollectedWorks,
+    CrawlResult,
+    ResolvedTarget,
+)
+from project.parser import build_result, extract_video_user_profile, save_result
+from project.utils import resolve_target
 
 
 class DouyinCrawlerService:
@@ -28,22 +34,42 @@ class DouyinCrawlerService:
         cache_ttl_seconds: float = 1800.0,
         refresh: bool = False,
     ) -> CrawlResult:
-        user_url = await resolve_user_url(
+        target = await resolve_target(
             user_input, request_timeout=self.settings.request_timeout_seconds
         )
-        sec_user_id = urlparse(user_url).path.rsplit("/", 1)[-1]
-        logger.info("目标用户 sec_user_id: {}", sec_user_id)
-
+        requested_limit = 1 if target.mode == "single_video" else top_limit
         if not force_login and not refresh:
             cached = load_cached_result(
                 self.settings.output_path,
-                user_url,
-                requested_limit=top_limit,
+                target.url,
+                requested_limit=requested_limit,
                 ttl_seconds=cache_ttl_seconds,
             )
             if cached is not None:
                 save_result(cached, self.settings.output_path)
                 return cached
+
+        if target.mode == "single_video":
+            result = await self._crawl_single_video(target, force_login=force_login)
+        else:
+            result = await self._crawl_profile(
+                target,
+                force_login=force_login,
+                top_limit=top_limit,
+            )
+        save_result(result, self.settings.output_path)
+        return result
+
+    async def _crawl_profile(
+        self,
+        target: ResolvedTarget,
+        *,
+        force_login: bool,
+        top_limit: int | None,
+    ) -> CrawlResult:
+        user_url = target.url
+        sec_user_id = urlparse(user_url).path.rsplit("/", 1)[-1]
+        logger.info("目标用户 sec_user_id: {}", sec_user_id)
 
         had_saved_state = not force_login and storage_state_has_session(
             self.settings.storage_state_path, self.settings.auth_cookie_names
@@ -70,8 +96,95 @@ class DouyinCrawlerService:
             total_works=collection.total_count,
             selection_limit=top_limit or 0,
         )
-        save_result(result, self.settings.output_path)
         return result
+
+    async def _crawl_single_video(
+        self,
+        target: ResolvedTarget,
+        *,
+        force_login: bool,
+    ) -> CrawlResult:
+        logger.info("目标单视频 aweme_id: {}", target.target_id)
+        had_saved_state = not force_login and storage_state_has_session(
+            self.settings.storage_state_path, self.settings.auth_cookie_names
+        )
+        if force_login:
+            captured = await self._capture_single_video(
+                target,
+                force_login=True,
+                anonymous=False,
+            )
+        else:
+            captured = await self._capture_single_video_with_fallback(
+                target,
+                had_saved_state=had_saved_state,
+            )
+
+        profile = extract_video_user_profile(captured.item)
+        return build_result(
+            target.url,
+            profile.sec_user_id,
+            [captured.item],
+            user_hint=profile,
+            download_user_agent=captured.headers.get("user-agent"),
+            total_works=1,
+            selection_limit=1,
+            collection_mode="single_video",
+        )
+
+    async def _capture_single_video_with_fallback(
+        self,
+        target: ResolvedTarget,
+        *,
+        had_saved_state: bool,
+    ) -> CapturedVideo:
+        try:
+            return await self._capture_single_video(
+                target,
+                force_login=False,
+                anonymous=True,
+            )
+        except CaptureError as exc:
+            if had_saved_state:
+                logger.warning("匿名单视频采集失败，将使用已有登录状态重试一次: {}", exc)
+                try:
+                    return await self._capture_single_video(
+                        target,
+                        force_login=False,
+                        anonymous=False,
+                    )
+                except CaptureError:
+                    if self.settings.browser_headless:
+                        raise
+                    logger.warning("已有登录状态也无法采集，将重新扫码后再试一次")
+                    self.settings.storage_state_path.unlink(missing_ok=True)
+                    return await self._capture_single_video(
+                        target,
+                        force_login=True,
+                        anonymous=False,
+                    )
+            if self.settings.browser_headless:
+                raise
+            logger.warning("匿名单视频采集失败，将扫码登录后重试一次: {}", exc)
+            return await self._capture_single_video(
+                target,
+                force_login=True,
+                anonymous=False,
+            )
+
+    async def _capture_single_video(
+        self,
+        target: ResolvedTarget,
+        *,
+        force_login: bool,
+        anonymous: bool,
+    ) -> CapturedVideo:
+        return await NetworkCapture(self.settings, debug=self.debug).capture_video(
+            target.url,
+            target.target_id,
+            force_login=force_login,
+            anonymous=anonymous,
+        )
 
     async def _collect(
         self, user_url: str, *, force_login: bool, top_limit: int | None

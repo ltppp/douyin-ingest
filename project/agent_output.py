@@ -23,6 +23,7 @@ def success_json(
     if limit > 0:
         videos = videos[:limit]
     output = AgentSuccessOutput(
+        collection_mode=result.collection_mode,
         user=result.user,
         total_works=result.total_works,
         returned_videos=len(videos),

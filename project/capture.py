@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-from urllib.parse import parse_qs, urlparse
+import json
+from urllib.parse import parse_qs, unquote, urlparse
 
 from loguru import logger
-from playwright.async_api import BrowserContext, Response, async_playwright
+from playwright.async_api import BrowserContext, Page, Response, async_playwright
 
 from project.config import Settings
 from project.detector import (
@@ -14,8 +15,8 @@ from project.detector import (
     response_matches_user,
 )
 from project.login import create_authenticated_context, save_storage_state
-from project.models import CapturedEndpoint, UserProfile
-from project.parser import find_user_profile
+from project.models import CapturedEndpoint, CapturedVideo, JsonObject, UserProfile
+from project.parser import find_aweme_item, find_user_profile
 from project.utils import write_json
 
 
@@ -84,6 +85,115 @@ class NetworkCapture:
         if self.debug:
             save_debug_capture(endpoint, self.settings)
         return endpoint
+
+    async def capture_video(
+        self,
+        video_url: str,
+        aweme_id: str,
+        *,
+        force_login: bool = False,
+        anonymous: bool = False,
+    ) -> CapturedVideo:
+        found: asyncio.Future[CapturedVideo] = asyncio.get_running_loop().create_future()
+        tasks: set[asyncio.Task[None]] = set()
+        task_errors: list[BaseException] = []
+
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(headless=self.settings.browser_headless)
+            context = await create_authenticated_context(
+                browser,
+                self.settings,
+                force_login=force_login,
+                allow_anonymous=anonymous,
+            )
+            page = await context.new_page()
+            page.set_default_navigation_timeout(self.settings.navigation_timeout_ms)
+
+            def handle_response(response: Response) -> None:
+                task = asyncio.create_task(
+                    self._inspect_video_response(response, found, video_url, aweme_id)
+                )
+                tasks.add(task)
+                task.add_done_callback(
+                    lambda completed: _record_task_result(completed, tasks, task_errors)
+                )
+
+            page.on("response", handle_response)
+            try:
+                logger.info("打开单视频页面并监听详情接口: {}", video_url)
+                await page.goto(video_url, wait_until="domcontentloaded")
+                if self.debug:
+                    current = urlparse(page.url)
+                    logger.debug(
+                        "单视频页面导航结果: domain={} path={}", current.netloc, current.path
+                    )
+                try:
+                    captured = await asyncio.wait_for(
+                        asyncio.shield(found), timeout=self.settings.capture_timeout_seconds
+                    )
+                except TimeoutError as exc:
+                    item = await _find_video_in_page(page, aweme_id)
+                    if item is None:
+                        if task_errors:
+                            raise CaptureError(
+                                f"视频详情识别失败，响应处理出现异常: {task_errors[-1]}"
+                            ) from task_errors[-1]
+                        raise CaptureError(
+                            "未在限定时间内识别到目标视频详情；请确认链接有效且登录状态可用"
+                        ) from exc
+                    user_agent = await page.evaluate("navigator.userAgent")
+                    captured = CapturedVideo(
+                        url=video_url,
+                        item=item,
+                        headers={"user-agent": str(user_agent)},
+                    )
+                await _drain_tasks(tasks, self.settings.response_drain_timeout_seconds)
+            finally:
+                page.remove_listener("response", handle_response)
+                await _cancel_tasks(tasks)
+                await context.close()
+                await browser.close()
+
+        if self.debug:
+            save_debug_video_capture(captured, self.settings)
+        return captured
+
+    async def _inspect_video_response(
+        self,
+        response: Response,
+        found: asyncio.Future[CapturedVideo],
+        video_url: str,
+        aweme_id: str,
+    ) -> None:
+        if self.debug:
+            parsed = urlparse(response.url)
+            content_type = response.headers.get("content-type", "").split(";", 1)[0]
+            if "json" in content_type.lower() or response.request.resource_type == "document":
+                logger.debug(
+                    "单视频响应候选: status={} type={} domain={} path={}",
+                    response.status,
+                    content_type or "unknown",
+                    parsed.netloc,
+                    parsed.path,
+                )
+        if found.done() or not response.ok:
+            return
+        if "json" not in response.headers.get("content-type", "").lower():
+            return
+        try:
+            payload = await response.json()
+        except Exception as exc:
+            logger.debug("忽略无法解析的视频 JSON 响应 {}: {}", response.url, exc)
+            return
+        item = find_aweme_item(payload, aweme_id)
+        if item is None:
+            return
+        headers = {
+            key.lower(): value for key, value in (await response.request.all_headers()).items()
+        }
+        logger.info("已识别目标视频详情接口: {}", urlparse(response.url).path)
+        if not found.done():
+            found.set_result(CapturedVideo(url=video_url, item=item, headers=headers))
 
     async def _inspect_response(
         self,
@@ -156,6 +266,26 @@ def save_debug_capture(endpoint: CapturedEndpoint, settings: Settings) -> None:
     write_json(settings.debug_dir / "request_query.json", endpoint.query, mode=0o600)
     write_json(settings.debug_dir / "response_sample.json", endpoint.response_sample, mode=0o600)
     logger.info("Debug 请求样本已保存到 {}", settings.debug_dir)
+
+
+def save_debug_video_capture(captured: CapturedVideo, settings: Settings) -> None:
+    write_json(settings.debug_dir / "request_headers.json", captured.headers, mode=0o600)
+    write_json(settings.debug_dir / "video_response.json", captured.item, mode=0o600)
+    logger.info("Debug 视频详情样本已保存到 {}", settings.debug_dir)
+
+
+async def _find_video_in_page(page: Page, aweme_id: str) -> JsonObject | None:
+    scripts = await page.locator("script").all_text_contents()
+    for raw_text in scripts:
+        for text in (raw_text, unquote(raw_text)):
+            try:
+                payload = json.loads(text)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            item = find_aweme_item(payload, aweme_id)
+            if item is not None:
+                return item
+    return None
 
 
 def _store_profile_candidate(candidates: list[UserProfile], profile: UserProfile) -> None:

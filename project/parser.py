@@ -19,6 +19,7 @@ def build_result(
     download_user_agent: str | None = None,
     total_works: int | None = None,
     selection_limit: int | None = None,
+    collection_mode: Literal["profile", "single_video"] = "profile",
 ) -> CrawlResult:
     videos = parse_videos(raw_items)
     ranked = sorted(
@@ -32,6 +33,7 @@ def build_result(
     profile = extract_user_profile(raw_items, sec_user_id, user_hint=user_hint)
     return CrawlResult(
         source_url=source_url,
+        collection_mode=collection_mode,
         user=profile,
         total_works=total_works if total_works is not None else len(videos),
         top1=ranked[0] if ranked else None,
@@ -40,6 +42,34 @@ def build_result(
         selection_limit=selection_limit if selection_limit is not None else len(ranked),
         download_headers=_download_headers(download_user_agent),
         crawled_at=datetime.now(UTC),
+    )
+
+
+def find_aweme_item(value: Any, target_aweme_id: str) -> JsonObject | None:
+    if isinstance(value, dict):
+        aweme_id = _string(value.get("aweme_id"))
+        if aweme_id == target_aweme_id and isinstance(value.get("video"), dict):
+            return value
+        for child in value.values():
+            item = find_aweme_item(child, target_aweme_id)
+            if item is not None:
+                return item
+    elif isinstance(value, list):
+        for child in value:
+            item = find_aweme_item(child, target_aweme_id)
+            if item is not None:
+                return item
+    return None
+
+
+def extract_video_user_profile(item: JsonObject) -> UserProfile:
+    author = item.get("author")
+    if not isinstance(author, dict):
+        return UserProfile(nickname="未知用户", sec_user_id="unknown")
+    return UserProfile(
+        nickname=_first_string(author, "nickname", "unique_id", "short_id") or "未知用户",
+        sec_user_id=_first_string(author, "sec_uid", "sec_user_id") or "unknown",
+        reported_work_count=_first_integer(author, "aweme_count", "work_count", "works_count"),
     )
 
 

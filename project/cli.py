@@ -46,9 +46,9 @@ class AgentArgumentParser(argparse.ArgumentParser):
 def build_argument_parser() -> AgentArgumentParser:
     parser = AgentArgumentParser(
         prog="douyin-ingest",
-        description="自动发现作品接口，扫描元数据并仅保留点赞 Top N。",
+        description="自动识别用户主页或单视频，采集作品元数据与媒体地址。",
     )
-    parser.add_argument("user", help="抖音用户主页、短链或包含短链的分享文案")
+    parser.add_argument("user", help="抖音用户主页、单视频、短链或包含链接的分享文案")
     parser.add_argument("--debug", action="store_true", help="保存请求与响应调试样本")
     parser.add_argument("--force-login", action="store_true", help="忽略已有状态并重新扫码登录")
     parser.add_argument(
@@ -291,7 +291,18 @@ def _arguments_request_json(args: Sequence[str]) -> bool:
 
 def format_result(result: CrawlResult) -> str:
     selected = result.videos or result.top10
+    if result.collection_mode == "single_video":
+        lines = [
+            "采集模式: 单视频",
+            f"作者昵称: {result.user.nickname}",
+            f"sec_user_id: {result.user.sec_user_id}",
+            "",
+            "目标视频:",
+        ]
+        lines.append(_format_video(1, selected[0]) if selected else "无作品")
+        return "\n".join(lines)
     lines = [
+        "采集模式: 用户主页",
         f"用户昵称: {result.user.nickname}",
         f"sec_user_id: {result.user.sec_user_id}",
         f"全部作品数量: {result.total_works}",

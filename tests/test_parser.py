@@ -3,7 +3,13 @@ from __future__ import annotations
 import json
 
 from project.models import UserProfile
-from project.parser import build_result, find_user_profile, parse_videos, save_result
+from project.parser import (
+    build_result,
+    find_aweme_item,
+    find_user_profile,
+    parse_videos,
+    save_result,
+)
 
 
 def raw_video(aweme_id: str, digg_count: int, nickname: str = "测试用户") -> dict:
@@ -29,6 +35,14 @@ def raw_video(aweme_id: str, digg_count: int, nickname: str = "测试用户") ->
             "is_original_sound": True,
         },
     }
+
+
+def test_finds_target_aweme_inside_detail_response() -> None:
+    target = raw_video("7637452863689461026", 48)
+    payload = {"aweme_detail": target, "status_code": 0}
+
+    assert find_aweme_item(payload, "7637452863689461026") is target
+    assert find_aweme_item(payload, "missing") is None
 
 
 def test_parses_video_fields() -> None:

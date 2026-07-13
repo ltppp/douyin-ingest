@@ -38,7 +38,7 @@ FFmpeg/FFprobe warnings matter only when missing audio must be generated. A fast
 
 ## Agent JSON
 
-Successful crawl output has `ok: true`, `cache_hit`, `returned_videos`, `download_headers`, and popularity-sorted `videos[]`. Read these video fields when present:
+Successful crawl output has `ok: true`, `collection_mode`, `cache_hit`, `returned_videos`, `download_headers`, and `videos[]`. `collection_mode=profile` is popularity-sorted Top N; `collection_mode=single_video` contains only the requested work. Read these video fields when present:
 
 - `name`, `digg_count`
 - `video_download_url`
