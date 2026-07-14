@@ -1,6 +1,6 @@
 ---
 name: douyin-script-rewriter
-description: Use when a user provides a Douyin profile, single-video link, share text, or completed rewrite run and asks to correct a spoken transcript, analyze content, rewrite or imitate it, or receive a consolidated Markdown or Word deliverable.
+description: Use when a user provides an 抖音/Douyin (Chinese TikTok) profile, video link, share text, transcript, or completed rewrite run and asks for short-video copywriting/文案, 口播 script correction, viral-content analysis, imitation, rewrite, or a consolidated Markdown, DOCX, or Word deliverable. Do not use for generic TikTok.com content.
 license: Apache-2.0
 compatibility: Requires Python 3.12, the douyin-ingest CLI, and python-docx for Word output.
 metadata:
@@ -9,7 +9,9 @@ metadata:
 
 # Douyin Script Rewriter
 
-Correct raw Douyin speech transcripts, analyze their content mechanics, create original口播 rewrites, and save a complete downstream report. Crawling, ranking, media handling, and speech recognition belong exclusively to `douyin-content-ingest`.
+Correct Douyin/抖音 speech transcripts, analyze viral short-video mechanics, create original口播稿
+and文案 rewrites, and save a consolidated Markdown or DOCX/Word report. Crawling, ranking, media
+handling, and speech recognition belong exclusively to `douyin-content-ingest`.
 
 ## Hard Dependency
 

@@ -1,4 +1,4 @@
 interface:
   display_name: "Douyin Content Ingest"
-  short_description: "Collect Douyin Top N, audio, and transcripts"
+  short_description: "Collect Douyin/抖音 Top N, downloads, and transcripts"
   default_prompt: "Use $douyin-content-ingest to collect top Douyin videos and prepare audio or transcripts for analysis."

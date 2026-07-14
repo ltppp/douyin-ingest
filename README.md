@@ -2,8 +2,8 @@
 
 [![skills.sh](https://skills.sh/b/ltppp/douyin-ingest)](https://skills.sh/ltppp/douyin-ingest)
 
-一个面向下游 Agent 的抖音内容采集与预处理管道，负责作品采集、热度排序、媒体提取，
-并为可选的语音转写提供标准化输入。
+一个面向 Claude Code、Codex 等 Agent 的 Douyin/抖音内容工作流：按点赞量采集 Top N 热门视频，
+完成媒体下载、语音转文字、逐字稿校正、短视频文案/口播改写，并交付固定模板 Word 文档。
 
 ## 快速开始
 
@@ -174,7 +174,17 @@ douyin-doctor --profile agent --json
 - `douyin-content-ingest`：主页/单视频采集、Top N、媒体和原始转写。
 - `douyin-script-rewriter`：AI 校正版逐字稿、原创改写和固定模板 Word 交付。
 
-查看或安装：
+直接安装单个 Skill（与 `find-skills` 返回的命令格式一致）：
+
+```bash
+# 抖音热门视频采集、下载与语音转文字
+npx skills add ltppp/douyin-ingest@douyin-content-ingest
+
+# 抖音短视频文案、口播稿改写与 Word 交付
+npx skills add ltppp/douyin-ingest@douyin-script-rewriter
+```
+
+查看全部或一次安装完整工作流：
 
 ```bash
 npx skills add https://github.com/ltppp/douyin-ingest --list
