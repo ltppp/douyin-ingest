@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import os
 import platform
 import shlex
 import shutil
@@ -12,16 +13,24 @@ from dataclasses import asdict, dataclass
 from importlib import metadata
 from pathlib import Path
 from time import time as epoch_time
-from typing import Literal
+from typing import Literal, cast
 
 from project import __version__
 from project.paths import SOURCE_ROOT, default_runtime_root
 
 CheckStatus = Literal["pass", "warn", "fail"]
 PlatformName = Literal["linux", "macos", "windows", "unknown"]
+DoctorProfile = Literal["core", "media", "transcribe", "word", "agent"]
+
+PROFILE_CHOICES: tuple[DoctorProfile, ...] = (
+    "core",
+    "media",
+    "transcribe",
+    "word",
+    "agent",
+)
 
 RUNTIME_ROOT = default_runtime_root()
-DEFAULT_STORAGE_STATE = RUNTIME_ROOT / "storage" / "storage_state.json"
 AUTH_COOKIE_NAMES = frozenset({"sessionid", "sessionid_ss", "sid_guard", "uid_tt", "uid_tt_ss"})
 CORE_PACKAGES = (
     ("anyio", "anyio"),
@@ -47,8 +56,10 @@ class DoctorCheck:
 class DoctorReport:
     schema_version: str
     ok: bool
+    profile: DoctorProfile
     platform: PlatformName
     python_executable: str
+    runtime_root: str
     checks: tuple[DoctorCheck, ...]
 
     def to_dict(self) -> dict[str, object]:
@@ -58,8 +69,10 @@ class DoctorReport:
         return {
             "schema_version": self.schema_version,
             "ok": self.ok,
+            "profile": self.profile,
             "platform": self.platform,
             "python_executable": self.python_executable,
+            "runtime_root": self.runtime_root,
             "summary": counts,
             "checks": [asdict(check) for check in self.checks],
         }
@@ -70,16 +83,30 @@ def build_argument_parser() -> argparse.ArgumentParser:
         prog="douyin-doctor",
         description="检查 DouyinIngest 的 Python、浏览器、媒体工具和登录环境。",
     )
+    parser.add_argument(
+        "--profile",
+        choices=PROFILE_CHOICES,
+        default="core",
+        help="检查 core、media、transcribe、word 或完整 agent 能力（默认 core）",
+    )
     parser.add_argument("--json", action="store_true", help="输出适合 Agent 解析的 JSON")
     parser.add_argument("--version", action="version", version=__version__)
     return parser
 
 
-def run_checks() -> DoctorReport:
+def run_checks(
+    profile: DoctorProfile = "core", *, runtime_root: Path | None = None
+) -> DoctorReport:
     current_platform = detect_platform()
-    install_core = _pip_install_command()
+    root = (runtime_root or RUNTIME_ROOT).expanduser().resolve()
+    python_extra = profile if profile in {"transcribe", "word", "agent"} else None
+    install_core = _pip_install_command(python_extra)
+    media_required = profile in {"media", "transcribe", "agent"}
+    transcribe_required = profile in {"transcribe", "agent"}
+    word_required = profile in {"word", "agent"}
     checks = [
         _check_python(current_platform),
+        _check_runtime_directories(root),
         *(
             _check_package(
                 distribution,
@@ -89,23 +116,35 @@ def run_checks() -> DoctorReport:
             )
             for distribution, import_name in CORE_PACKAGES
         ),
-        _check_chromium(),
-        _check_executable("ffmpeg", required=False, current_platform=current_platform),
-        _check_executable("ffprobe", required=False, current_platform=current_platform),
-        _check_login_state(DEFAULT_STORAGE_STATE),
+        _check_chromium(required=profile != "word"),
+        _check_executable(
+            "ffmpeg", required=media_required, current_platform=current_platform
+        ),
+        _check_executable(
+            "ffprobe", required=media_required, current_platform=current_platform
+        ),
+        _check_login_state(root / "storage" / "storage_state.json"),
         _check_package(
             "faster-whisper",
             "faster_whisper",
-            required=False,
-            fix_command=_pip_install_command("transcribe"),
+            required=transcribe_required,
+            fix_command=_pip_install_command("agent" if profile == "agent" else "transcribe"),
+        ),
+        _check_package(
+            "python-docx",
+            "docx",
+            required=word_required,
+            fix_command=_pip_install_command("agent" if profile == "agent" else "word"),
         ),
     ]
     ok = all(check.status != "fail" for check in checks if check.required)
     return DoctorReport(
-        schema_version="1.0",
+        schema_version="1.1",
         ok=ok,
+        profile=profile,
         platform=current_platform,
         python_executable=sys.executable,
+        runtime_root=str(root),
         checks=tuple(checks),
     )
 
@@ -124,7 +163,9 @@ def detect_platform(system: str | None = None) -> PlatformName:
 def format_text(report: DoctorReport) -> str:
     lines = [
         f"DouyinIngest doctor ({report.platform})",
+        f"Profile: {report.profile}",
         f"Python: {report.python_executable}",
+        f"Runtime: {report.runtime_root}",
         "",
     ]
     for check in report.checks:
@@ -140,7 +181,8 @@ def format_text(report: DoctorReport) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_argument_parser().parse_args(argv)
-    report = run_checks()
+    profile = cast(DoctorProfile, args.profile)
+    report = run_checks(profile)
     if args.json:
         print(json.dumps(report.to_dict(), ensure_ascii=False, separators=(",", ":")))
     else:
@@ -163,6 +205,39 @@ def _check_python(current_platform: PlatformName) -> DoctorCheck:
         version=version,
         message="Python 3.12 or newer is available." if supported else "Python 3.12+ is required.",
         fix_command=None if supported else _python_install_hint(current_platform),
+    )
+
+
+def _check_runtime_directories(runtime_root: Path) -> DoctorCheck:
+    required_directories = tuple(
+        runtime_root / relative for relative in ("storage", "output", "logs")
+    )
+    missing = [path for path in required_directories if not path.is_dir()]
+    not_writable = [
+        path for path in required_directories if path.is_dir() and not os.access(path, os.W_OK)
+    ]
+    ready = not missing and not not_writable
+    problems: list[str] = []
+    if missing:
+        problems.append("missing: " + ", ".join(str(path) for path in missing))
+    if not_writable:
+        problems.append("not writable: " + ", ".join(str(path) for path in not_writable))
+    return DoctorCheck(
+        id="runtime_directories",
+        label="Runtime directories",
+        status="pass" if ready else "fail",
+        required=True,
+        version=None,
+        message=(
+            f"Runtime directories are writable under {runtime_root}."
+            if ready
+            else "Runtime directories are not ready (" + "; ".join(problems) + ")."
+        ),
+        fix_command=(
+            None
+            if ready
+            else _python_command("-m", "project.main", "setup", "--skip-browser")
+        ),
     )
 
 
@@ -197,8 +272,9 @@ def _installed_package_version(distribution: str, import_name: str) -> str | Non
         return None
 
 
-def _check_chromium() -> DoctorCheck:
+def _check_chromium(*, required: bool = True) -> DoctorCheck:
     fix_command = _python_command("-m", "playwright", "install", "chromium")
+    failure_status: CheckStatus = "fail" if required else "warn"
     try:
         from playwright.sync_api import sync_playwright
 
@@ -208,8 +284,8 @@ def _check_chromium() -> DoctorCheck:
                 return DoctorCheck(
                     id="chromium",
                     label="Playwright Chromium",
-                    status="fail",
-                    required=True,
+                    status=failure_status,
+                    required=required,
                     version=None,
                     message=f"Chromium executable is missing: {executable}",
                     fix_command=fix_command,
@@ -219,8 +295,8 @@ def _check_chromium() -> DoctorCheck:
                 return DoctorCheck(
                     id="chromium",
                     label="Playwright Chromium",
-                    status="fail",
-                    required=True,
+                    status=failure_status,
+                    required=required,
                     version=None,
                     message=f"Chromium exists but could not be executed: {executable}",
                     fix_command=fix_command,
@@ -231,8 +307,8 @@ def _check_chromium() -> DoctorCheck:
         return DoctorCheck(
             id="chromium",
             label="Playwright Chromium",
-            status="fail",
-            required=True,
+            status=failure_status,
+            required=required,
             version=None,
             message=f"Could not launch Chromium: {exc}",
             fix_command=fix_command,
@@ -241,7 +317,7 @@ def _check_chromium() -> DoctorCheck:
         id="chromium",
         label="Playwright Chromium",
         status="pass",
-        required=True,
+        required=required,
         version=version,
         message=f"Chromium launched successfully: {executable}",
         fix_command=None,

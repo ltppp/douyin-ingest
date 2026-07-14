@@ -1,0 +1,14 @@
+{
+  "$schema": "https://skills.sh/schemas/skills.sh.schema.json",
+  "notGrouped": "bottom",
+  "groupings": [
+    {
+      "title": "Douyin Workflow",
+      "description": "Collect, transcribe, correct, rewrite, and package Douyin content.",
+      "skills": [
+        "douyin-content-ingest",
+        "douyin-script-rewriter"
+      ]
+    }
+  ]
+}

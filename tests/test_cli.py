@@ -87,6 +87,7 @@ async def test_json_mode_keeps_stdout_machine_readable(tmp_path, monkeypatch, ca
         top_limit=None,
         cache_ttl_seconds=1800.0,
         refresh=False,
+        **kwargs,
     ):
         logger.info("this must stay on stderr")
         return result
@@ -105,6 +106,7 @@ async def test_json_mode_keeps_stdout_machine_readable(tmp_path, monkeypatch, ca
     assert payload["selection_limit"] == 10
     assert payload["cache_hit"] is False
     assert payload["videos"][0]["name"] == "第一条"
+    assert payload["videos"][0]["duration_seconds"] is None
     assert payload["videos"][0]["video_download_url"] == "https://video.test/1.mp4"
     assert payload["videos"][0]["audio_download_url"] == "https://audio.test/1.mp3"
     assert payload["videos"][0]["speech_audio_download_url"] == "https://audio.test/1.mp3"
@@ -149,6 +151,47 @@ async def test_json_mode_reports_single_video_collection(tmp_path, monkeypatch, 
     assert payload["returned_videos"] == 1
     assert payload["selection_limit"] == 1
     assert payload["videos"][0]["aweme_id"] == "7637452863689461026"
+
+
+@pytest.mark.asyncio
+async def test_duration_and_digg_filters_are_forwarded_to_crawl(tmp_path, monkeypatch) -> None:
+    settings = Settings(
+        output_path=tmp_path / "result.json",
+        storage_state_path=tmp_path / "state.json",
+        debug_dir=tmp_path / "debug",
+        log_path=tmp_path / "crawler.log",
+    )
+    result = CrawlResult(
+        source_url="https://www.douyin.com/user/user",
+        user=UserProfile(nickname="用户", sec_user_id="user"),
+        total_works=0,
+        crawled_at=datetime.now(UTC),
+    )
+    crawl_kwargs = {}
+
+    async def fake_crawl(self, user_input, **kwargs):
+        crawl_kwargs.update(kwargs)
+        return result
+
+    monkeypatch.setattr(cli_module, "create_settings", lambda args: settings)
+    monkeypatch.setattr(cli_module.DouyinCrawlerService, "crawl", fake_crawl)
+    args = build_argument_parser().parse_args(
+        [
+            "https://www.douyin.com/user/user",
+            "--json",
+            "--min-duration",
+            "30.5",
+            "--max-duration",
+            "180",
+            "--min-digg-count",
+            "1000",
+        ]
+    )
+
+    assert await execute(args) == 0
+    assert crawl_kwargs["min_duration_seconds"] == 30.5
+    assert crawl_kwargs["max_duration_seconds"] == 180
+    assert crawl_kwargs["min_digg_count"] == 1_000
 
 
 @pytest.mark.asyncio
@@ -212,6 +255,51 @@ def test_json_mode_emits_argument_parser_error(capsys) -> None:
     assert payload["ok"] is False
     assert payload["error"]["type"] == "ValueError"
     assert "必须是非负整数" in payload["error"]["message"]
+
+
+@pytest.mark.parametrize("flag,value", [("--min-duration", "nan"), ("--max-duration", "inf")])
+def test_duration_filters_reject_non_finite_values(flag, value, capsys) -> None:
+    parser = build_argument_parser()
+
+    with pytest.raises(SystemExit) as exc_info:
+        parse_cli_arguments(
+            parser,
+            ["https://www.douyin.com/user/user", "--json", flag, value],
+        )
+
+    assert exc_info.value.code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert "必须是有限的非负数" in payload["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_rejects_reversed_duration_range_before_crawl(tmp_path, monkeypatch, capsys) -> None:
+    settings = Settings(
+        output_path=tmp_path / "result.json",
+        storage_state_path=tmp_path / "state.json",
+        debug_dir=tmp_path / "debug",
+        log_path=tmp_path / "crawler.log",
+    )
+
+    async def fail_crawl(self, user_input, **kwargs):
+        raise AssertionError("crawl should not run")
+
+    monkeypatch.setattr(cli_module, "create_settings", lambda args: settings)
+    monkeypatch.setattr(cli_module.DouyinCrawlerService, "crawl", fail_crawl)
+    args = build_argument_parser().parse_args(
+        [
+            "https://www.douyin.com/user/user",
+            "--json",
+            "--min-duration",
+            "60",
+            "--max-duration",
+            "30",
+        ]
+    )
+
+    assert await execute(args) == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"]["message"] == "--min-duration 不能大于 --max-duration"
 
 
 @pytest.mark.asyncio

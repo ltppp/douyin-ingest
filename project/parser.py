@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from loguru import logger
 
+from project.filtering import ContentFilters, raw_duration_seconds
 from project.models import CrawlResult, JsonObject, UserProfile, Video
 from project.utils import normalize_scalar_text, write_json
 
@@ -20,8 +21,10 @@ def build_result(
     total_works: int | None = None,
     selection_limit: int | None = None,
     collection_mode: Literal["profile", "single_video"] = "profile",
+    content_filters: ContentFilters | None = None,
 ) -> CrawlResult:
-    videos = parse_videos(raw_items)
+    filters = content_filters or ContentFilters()
+    videos = [video for video in parse_videos(raw_items) if filters.matches_video(video)]
     ranked = sorted(
         videos,
         key=lambda video: (
@@ -40,6 +43,9 @@ def build_result(
         top10=ranked[:10],
         videos=ranked,
         selection_limit=selection_limit if selection_limit is not None else len(ranked),
+        min_duration_seconds=filters.min_duration_seconds,
+        max_duration_seconds=filters.max_duration_seconds,
+        min_digg_count=filters.min_digg_count,
         download_headers=_download_headers(download_user_agent),
         crawled_at=datetime.now(UTC),
     )
@@ -95,6 +101,7 @@ def parse_videos(raw_items: list[JsonObject]) -> list[Video]:
             Video(
                 aweme_id=aweme_id,
                 title=_first_string(item, "desc", "title", "caption") or "",
+                duration_seconds=raw_duration_seconds(item),
                 publish_time=_parse_timestamp(item.get("create_time")),
                 digg_count=_integer(stats.get("digg_count")),
                 comment_count=_integer(stats.get("comment_count")),

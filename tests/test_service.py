@@ -86,6 +86,51 @@ async def test_service_collects_only_resolved_single_video(tmp_path, monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_single_video_can_be_excluded_by_duration_filter(tmp_path, monkeypatch) -> None:
+    settings = Settings(
+        storage_state_path=tmp_path / "state.json",
+        output_path=tmp_path / "result.json",
+        debug_dir=tmp_path / "debug",
+        log_path=tmp_path / "crawler.log",
+    )
+
+    class FakeCapture:
+        def __init__(self, settings, *, debug=False) -> None:
+            pass
+
+        async def capture_video(
+            self, video_url, aweme_id, *, force_login=False, anonymous=False
+        ):
+            return CapturedVideo(
+                url=video_url,
+                item={
+                    "aweme_id": aweme_id,
+                    "duration": 15_000,
+                    "author": {"nickname": "作者", "sec_uid": "author"},
+                },
+            )
+
+    async def fake_resolve(value, request_timeout=15.0):
+        return ResolvedTarget(
+            mode="single_video",
+            url="https://www.douyin.com/video/1",
+            target_id="1",
+        )
+
+    monkeypatch.setattr(service_module, "NetworkCapture", FakeCapture)
+    monkeypatch.setattr(service_module, "resolve_target", fake_resolve)
+
+    result = await DouyinCrawlerService(settings).crawl(
+        "short-video", min_duration_seconds=30
+    )
+
+    assert result.total_works == 1
+    assert result.videos == []
+    assert result.top1 is None
+    assert result.min_duration_seconds == 30
+
+
+@pytest.mark.asyncio
 async def test_single_video_falls_back_to_saved_state_after_anonymous_failure(
     tmp_path, monkeypatch
 ) -> None:
@@ -197,7 +242,7 @@ async def test_retries_once_with_forced_login_for_stale_saved_state(tmp_path, mo
         def __init__(self, settings) -> None:
             pass
 
-        async def fetch_all(self, captured_endpoint, *, top_limit=None):
+        async def fetch_all(self, captured_endpoint, *, top_limit=None, content_filters=None):
             return CollectedWorks(items=[], total_count=0)
 
     async def fake_resolve(value, request_timeout=15.0):

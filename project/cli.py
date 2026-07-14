@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import math
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -84,7 +85,17 @@ def build_argument_parser() -> AgentArgumentParser:
         "--min-digg-count",
         type=_non_negative_int,
         default=0,
-        help="JSON 仅返回不低于该点赞数的作品",
+        help="仅保留不低于该点赞数的作品",
+    )
+    parser.add_argument(
+        "--min-duration",
+        type=_non_negative_float,
+        help="仅保留时长不低于该秒数的作品",
+    )
+    parser.add_argument(
+        "--max-duration",
+        type=_non_negative_float,
+        help="仅保留时长不高于该秒数的作品",
     )
     parser.add_argument(
         "--cache-ttl",
@@ -151,6 +162,13 @@ async def execute(args: argparse.Namespace) -> int:
         if args.force_login and args.headless:
             error = ValueError("--force-login 不能与 --headless 同时使用")
             return _emit_error(args, error, str(error), exit_code=2)
+        if (
+            args.min_duration is not None
+            and args.max_duration is not None
+            and args.min_duration > args.max_duration
+        ):
+            error = ValueError("--min-duration 不能大于 --max-duration")
+            return _emit_error(args, error, str(error), exit_code=2)
         if args.transcribe:
             ensure_transcription_dependency()
 
@@ -160,6 +178,9 @@ async def execute(args: argparse.Namespace) -> int:
             top_limit=args.limit or None,
             cache_ttl_seconds=args.cache_ttl,
             refresh=bool(args.refresh),
+            min_duration_seconds=args.min_duration,
+            max_duration_seconds=args.max_duration,
+            min_digg_count=args.min_digg_count,
         )
         if args.speech_audio_dir is not None or args.transcribe:
             audio_dir = (
@@ -247,8 +268,8 @@ def _non_negative_int(value: str) -> int:
 
 def _non_negative_float(value: str) -> float:
     parsed = float(value)
-    if parsed < 0:
-        raise argparse.ArgumentTypeError("必须是非负数")
+    if not math.isfinite(parsed) or parsed < 0:
+        raise argparse.ArgumentTypeError("必须是有限的非负数")
     return parsed
 
 
@@ -320,8 +341,13 @@ def format_result(result: CrawlResult) -> str:
 
 def _format_video(rank: int, video: Video) -> str:
     published = video.publish_time.isoformat() if video.publish_time else "未知时间"
+    duration = (
+        f"{video.duration_seconds:g} 秒"
+        if video.duration_seconds is not None
+        else "未知时长"
+    )
     return (
-        f"{rank:>2}. 点赞 {video.digg_count:<10} | {published} | "
+        f"{rank:>2}. 点赞 {video.digg_count:<10} | {duration} | {published} | "
         f"{video.title or '(无标题)'} | {video.video_url}"
     )
 
