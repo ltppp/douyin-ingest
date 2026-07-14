@@ -15,7 +15,7 @@
 python3.12 -m venv .venv
 . .venv/bin/activate
 python -m pip install \
-  'douyin-ingest[agent] @ git+https://github.com/ltppp/douyin-ingest.git'
+  'douyin-ingest[agent] @ git+https://github.com/ltppp/douyin-ingest.git@v0.3.0'
 douyin-ingest setup --profile agent
 douyin-ingest doctor --profile agent
 ```
@@ -26,7 +26,7 @@ Windows PowerShell：
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install `
-  "douyin-ingest[agent] @ git+https://github.com/ltppp/douyin-ingest.git"
+  "douyin-ingest[agent] @ git+https://github.com/ltppp/douyin-ingest.git@v0.3.0"
 douyin-ingest setup --profile agent
 douyin-ingest doctor --profile agent
 ```
@@ -55,7 +55,7 @@ douyin-ingest 'https://v.douyin.com/xxxx/' --json
 
 ```bash
 python -m pip install \
-  'douyin-ingest @ git+https://github.com/ltppp/douyin-ingest.git'
+  'douyin-ingest @ git+https://github.com/ltppp/douyin-ingest.git@v0.3.0'
 douyin-ingest setup --profile core
 douyin-ingest doctor --profile core
 ```
