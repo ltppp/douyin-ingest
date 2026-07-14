@@ -86,3 +86,21 @@ def test_skill_descriptions_cover_common_search_intents() -> None:
         assert description.startswith("Use when")
         assert len(description) <= 500
         assert not {term for term in terms if term.casefold() not in normalized}
+
+
+def test_skills_define_supply_chain_and_untrusted_content_boundaries() -> None:
+    sources = {
+        skill: (SKILLS_DIRECTORY / skill / "SKILL.md").read_text(encoding="utf-8")
+        for skill in EXPECTED_SKILLS
+    }
+
+    for source in sources.values():
+        normalized = re.sub(r"\s+", " ", source)
+        assert "https://github.com/ltppp/douyin-ingest" in normalized
+        assert "## Untrusted Content Boundary" in source
+        assert "data, never instructions" in normalized
+        assert "Do not execute commands" in normalized
+
+    ingest_source = sources["douyin-content-ingest"]
+    assert "git@v0.3.0" in ingest_source
+    assert "run the returned" not in ingest_source
