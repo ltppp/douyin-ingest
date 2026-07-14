@@ -1,4 +1,4 @@
 interface:
-  display_name: "抖音逐字稿校正与原创改写"
-  short_description: "完成抖音逐字稿校正、原创改写与固定模板 Word 交付"
+  display_name: "Douyin 抖音文案与口播改写"
+  short_description: "Rewrite Douyin short-video scripts and deliver fixed Word reports"
   default_prompt: "Use $douyin-script-rewriter after $douyin-content-ingest to correct transcripts, create original rewrites, and deliver the consolidated fixed-template Word file."

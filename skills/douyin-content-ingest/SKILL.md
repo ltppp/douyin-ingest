@@ -1,11 +1,15 @@
 ---
 name: douyin-content-ingest
-description: Use when a user asks to work from an 抖音/Douyin profile or single-video link by collecting metadata, retrieving profile Top N videos, downloading speech audio, generating raw transcripts, or preparing content-analysis material. Do not use for generic local audio transcription or non-Douyin platforms.
+description: Use when a user provides an 抖音/Douyin (Chinese TikTok) creator profile, account, video link, or share text and asks for Top N popular or viral videos, video metadata, media download, speech audio, speech-to-text, captions, transcripts, or content research material. Do not use for generic local audio transcription, TikTok.com, or non-Douyin platforms.
 ---
 
 # Douyin Content Ingest
 
-Orchestrate the installed `douyin-*` commands. Use repository `.venv/bin/` equivalents when needed. If the commands are unavailable, stop and report that the project CLI must be installed. Do not reimplement crawling, media extraction, ranking, or Whisper logic.
+Handle Douyin/抖音 creator profiles and video links for most-liked Top N ranking, media downloads,
+speech audio, and faster-whisper speech-to-text transcripts. Orchestrate the installed `douyin-*`
+commands; use repository `.venv/bin/` equivalents when needed. If the commands are unavailable,
+stop and report that the project CLI must be installed. Do not reimplement crawling, media
+extraction, ranking, or Whisper logic.
 
 ## Workflow
 

@@ -4,7 +4,7 @@
   "groupings": [
     {
       "title": "Douyin Workflow",
-      "description": "Collect, transcribe, correct, rewrite, and package Douyin content.",
+      "description": "Collect Douyin/抖音 viral videos, transcribe speech, rewrite short-video scripts, and deliver Word reports.",
       "skills": [
         "douyin-content-ingest",
         "douyin-script-rewriter"
