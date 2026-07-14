@@ -16,6 +16,7 @@ def raw_video(aweme_id: str, digg_count: int, nickname: str = "测试用户") ->
     return {
         "aweme_id": aweme_id,
         "desc": f"视频 {aweme_id}",
+        "duration": 90_500,
         "create_time": 1_700_000_000,
         "statistics": {
             "digg_count": digg_count,
@@ -50,6 +51,7 @@ def test_parses_video_fields() -> None:
 
     assert video.aweme_id == "123"
     assert video.title == "视频 123"
+    assert video.duration_seconds == 90.5
     assert video.digg_count == 99
     assert video.comment_count == 3
     assert video.collect_count == 1

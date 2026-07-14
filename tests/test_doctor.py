@@ -11,10 +11,12 @@ from project.doctor import DoctorCheck, DoctorReport
 
 def _report(*checks: DoctorCheck) -> DoctorReport:
     return DoctorReport(
-        schema_version="1.0",
+        schema_version="1.1",
         ok=all(check.status != "fail" for check in checks if check.required),
+        profile="core",
         platform="linux",
         python_executable="/venv/bin/python",
+        runtime_root="/runtime",
         checks=checks,
     )
 
@@ -32,11 +34,13 @@ def test_main_json_emits_machine_readable_report(monkeypatch, capsys) -> None:
             "python -m pip install -e '.[transcribe]'",
         ),
     )
-    monkeypatch.setattr(doctor, "run_checks", lambda: report)
+    monkeypatch.setattr(doctor, "run_checks", lambda profile: report)
 
     assert doctor.main(["--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["schema_version"] == "1.0"
+    assert payload["schema_version"] == "1.1"
+    assert payload["profile"] == "core"
+    assert payload["runtime_root"] == "/runtime"
     assert payload["ok"] is True
     assert payload["summary"] == {"pass": 1, "warn": 1, "fail": 0}
     assert payload["checks"][1]["required"] is False
@@ -55,7 +59,7 @@ def test_main_returns_nonzero_when_required_check_fails(monkeypatch, capsys) -> 
             "python -m playwright install chromium",
         )
     )
-    monkeypatch.setattr(doctor, "run_checks", lambda: report)
+    monkeypatch.setattr(doctor, "run_checks", lambda profile: report)
 
     assert doctor.main(["--json"]) == 1
     assert json.loads(capsys.readouterr().out)["ok"] is False
@@ -158,3 +162,121 @@ def test_version_command_rejects_nonzero_exit(monkeypatch, tmp_path) -> None:
     )
 
     assert doctor._run_version_command(executable, "--version") is None
+
+
+def test_agent_profile_requires_full_pipeline_dependencies(monkeypatch, tmp_path) -> None:
+    required_by_id: dict[str, bool] = {}
+
+    def check(identifier: str, required: bool = True) -> DoctorCheck:
+        required_by_id[identifier] = required
+        return DoctorCheck(identifier, identifier, "pass", required, "1", "ready", None)
+
+    monkeypatch.setattr(doctor, "_check_python", lambda platform: check("python"))
+    monkeypatch.setattr(doctor, "_check_runtime_directories", lambda root: check("runtime"))
+    monkeypatch.setattr(
+        doctor, "_check_chromium", lambda *, required: check("chromium", required)
+    )
+    monkeypatch.setattr(
+        doctor,
+        "_check_executable",
+        lambda name, *, required, current_platform: check(name, required),
+    )
+    monkeypatch.setattr(doctor, "_check_login_state", lambda path: check("login_state", False))
+    monkeypatch.setattr(
+        doctor,
+        "_check_package",
+        lambda distribution, import_name, *, required, fix_command: check(
+            f"package:{distribution}", required
+        ),
+    )
+
+    report = doctor.run_checks("agent", runtime_root=tmp_path)
+
+    assert report.profile == "agent"
+    for identifier in (
+        "ffmpeg",
+        "ffprobe",
+        "package:faster-whisper",
+        "package:python-docx",
+    ):
+        assert required_by_id[identifier] is True
+
+
+def test_core_profile_keeps_pipeline_extensions_optional(monkeypatch, tmp_path) -> None:
+    required_by_id: dict[str, bool] = {}
+
+    def check(identifier: str, required: bool = True) -> DoctorCheck:
+        required_by_id[identifier] = required
+        return DoctorCheck(identifier, identifier, "pass", required, "1", "ready", None)
+
+    monkeypatch.setattr(doctor, "_check_python", lambda platform: check("python"))
+    monkeypatch.setattr(doctor, "_check_runtime_directories", lambda root: check("runtime"))
+    monkeypatch.setattr(
+        doctor, "_check_chromium", lambda *, required: check("chromium", required)
+    )
+    monkeypatch.setattr(
+        doctor,
+        "_check_executable",
+        lambda name, *, required, current_platform: check(name, required),
+    )
+    monkeypatch.setattr(doctor, "_check_login_state", lambda path: check("login_state", False))
+    monkeypatch.setattr(
+        doctor,
+        "_check_package",
+        lambda distribution, import_name, *, required, fix_command: check(
+            f"package:{distribution}", required
+        ),
+    )
+
+    doctor.run_checks("core", runtime_root=tmp_path)
+
+    for identifier in (
+        "ffmpeg",
+        "ffprobe",
+        "package:faster-whisper",
+        "package:python-docx",
+    ):
+        assert required_by_id[identifier] is False
+
+
+def test_word_profile_does_not_require_browser_or_media(monkeypatch, tmp_path) -> None:
+    required_by_id: dict[str, bool] = {}
+
+    def check(identifier: str, required: bool = True) -> DoctorCheck:
+        required_by_id[identifier] = required
+        return DoctorCheck(identifier, identifier, "pass", required, "1", "ready", None)
+
+    monkeypatch.setattr(doctor, "_check_python", lambda platform: check("python"))
+    monkeypatch.setattr(doctor, "_check_runtime_directories", lambda root: check("runtime"))
+    monkeypatch.setattr(
+        doctor, "_check_chromium", lambda *, required: check("chromium", required)
+    )
+    monkeypatch.setattr(
+        doctor,
+        "_check_executable",
+        lambda name, *, required, current_platform: check(name, required),
+    )
+    monkeypatch.setattr(doctor, "_check_login_state", lambda path: check("login_state", False))
+    monkeypatch.setattr(
+        doctor,
+        "_check_package",
+        lambda distribution, import_name, *, required, fix_command: check(
+            f"package:{distribution}", required
+        ),
+    )
+
+    doctor.run_checks("word", runtime_root=tmp_path)
+
+    assert required_by_id["chromium"] is False
+    assert required_by_id["ffmpeg"] is False
+    assert required_by_id["ffprobe"] is False
+    assert required_by_id["package:faster-whisper"] is False
+    assert required_by_id["package:python-docx"] is True
+
+
+def test_runtime_directory_check_points_to_setup_when_missing(tmp_path) -> None:
+    check = doctor._check_runtime_directories(tmp_path / "missing")
+
+    assert check.status == "fail"
+    assert check.required is True
+    assert check.fix_command and "setup --skip-browser" in check.fix_command

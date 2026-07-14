@@ -8,6 +8,7 @@ from project.api import AuthenticationExpiredError, DouyinApiClient
 from project.cache import load_cached_result
 from project.capture import CaptureError, NetworkCapture
 from project.config import Settings
+from project.filtering import ContentFilters
 from project.login import storage_state_has_session
 from project.models import (
     CapturedEndpoint,
@@ -33,7 +34,15 @@ class DouyinCrawlerService:
         top_limit: int | None = 10,
         cache_ttl_seconds: float = 1800.0,
         refresh: bool = False,
+        min_duration_seconds: float | None = None,
+        max_duration_seconds: float | None = None,
+        min_digg_count: int = 0,
     ) -> CrawlResult:
+        content_filters = ContentFilters(
+            min_duration_seconds=min_duration_seconds,
+            max_duration_seconds=max_duration_seconds,
+            min_digg_count=min_digg_count,
+        )
         target = await resolve_target(
             user_input, request_timeout=self.settings.request_timeout_seconds
         )
@@ -44,18 +53,24 @@ class DouyinCrawlerService:
                 target.url,
                 requested_limit=requested_limit,
                 ttl_seconds=cache_ttl_seconds,
+                content_filters=content_filters,
             )
             if cached is not None:
                 save_result(cached, self.settings.output_path)
                 return cached
 
         if target.mode == "single_video":
-            result = await self._crawl_single_video(target, force_login=force_login)
+            result = await self._crawl_single_video(
+                target,
+                force_login=force_login,
+                content_filters=content_filters,
+            )
         else:
             result = await self._crawl_profile(
                 target,
                 force_login=force_login,
                 top_limit=top_limit,
+                content_filters=content_filters,
             )
         save_result(result, self.settings.output_path)
         return result
@@ -66,6 +81,7 @@ class DouyinCrawlerService:
         *,
         force_login: bool,
         top_limit: int | None,
+        content_filters: ContentFilters,
     ) -> CrawlResult:
         user_url = target.url
         sec_user_id = urlparse(user_url).path.rsplit("/", 1)[-1]
@@ -76,7 +92,10 @@ class DouyinCrawlerService:
         )
         try:
             endpoint, collection = await self._collect(
-                user_url, force_login=force_login, top_limit=top_limit
+                user_url,
+                force_login=force_login,
+                top_limit=top_limit,
+                content_filters=content_filters,
             )
         except (AuthenticationExpiredError, CaptureError) as exc:
             if not had_saved_state or self.settings.browser_headless:
@@ -84,7 +103,10 @@ class DouyinCrawlerService:
             logger.warning("已有登录状态可能失效，将自动重新扫码后重试一次: {}", exc)
             self.settings.storage_state_path.unlink(missing_ok=True)
             endpoint, collection = await self._collect(
-                user_url, force_login=True, top_limit=top_limit
+                user_url,
+                force_login=True,
+                top_limit=top_limit,
+                content_filters=content_filters,
             )
 
         result = build_result(
@@ -95,6 +117,7 @@ class DouyinCrawlerService:
             download_user_agent=endpoint.headers.get("user-agent"),
             total_works=collection.total_count,
             selection_limit=top_limit or 0,
+            content_filters=content_filters,
         )
         return result
 
@@ -103,6 +126,7 @@ class DouyinCrawlerService:
         target: ResolvedTarget,
         *,
         force_login: bool,
+        content_filters: ContentFilters,
     ) -> CrawlResult:
         logger.info("目标单视频 aweme_id: {}", target.target_id)
         had_saved_state = not force_login and storage_state_has_session(
@@ -130,6 +154,7 @@ class DouyinCrawlerService:
             total_works=1,
             selection_limit=1,
             collection_mode="single_video",
+            content_filters=content_filters,
         )
 
     async def _capture_single_video_with_fallback(
@@ -187,10 +212,19 @@ class DouyinCrawlerService:
         )
 
     async def _collect(
-        self, user_url: str, *, force_login: bool, top_limit: int | None
+        self,
+        user_url: str,
+        *,
+        force_login: bool,
+        top_limit: int | None,
+        content_filters: ContentFilters,
     ) -> tuple[CapturedEndpoint, CollectedWorks]:
         endpoint = await NetworkCapture(self.settings, debug=self.debug).capture(
             user_url, force_login=force_login
         )
-        collection = await DouyinApiClient(self.settings).fetch_all(endpoint, top_limit=top_limit)
+        collection = await DouyinApiClient(self.settings).fetch_all(
+            endpoint,
+            top_limit=top_limit,
+            content_filters=content_filters,
+        )
         return endpoint, collection

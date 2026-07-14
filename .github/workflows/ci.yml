@@ -16,6 +16,9 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - name: Install development dependencies
         run: python -m pip install -e '.[dev]'
       - name: Ruff
@@ -24,3 +27,11 @@ jobs:
         run: mypy project
       - name: Pytest
         run: pytest -q
+      - name: Validate Agent Skills discovery
+        env:
+          DISABLE_TELEMETRY: "1"
+          NO_COLOR: "1"
+        run: |
+          npx --yes skills add . --list | tee /tmp/douyin-skills.txt
+          grep -F "douyin-content-ingest" /tmp/douyin-skills.txt
+          grep -F "douyin-script-rewriter" /tmp/douyin-skills.txt

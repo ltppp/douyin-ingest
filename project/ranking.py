@@ -3,6 +3,7 @@ from __future__ import annotations
 import heapq
 from typing import Any
 
+from project.filtering import ContentFilters, raw_digg_count
 from project.models import CollectedWorks, JsonObject
 from project.utils import normalize_scalar_text
 
@@ -13,9 +14,11 @@ type HeapEntry = tuple[int, int, str, JsonObject]
 class TopWorkCollector:
     """Count all unique works while retaining only the highest-ranked items."""
 
-    def __init__(self, limit: int | None) -> None:
+    def __init__(self, limit: int | None, *, content_filters: ContentFilters | None = None) -> None:
         self.limit = limit if limit is not None and limit > 0 else None
+        self.content_filters = content_filters or ContentFilters()
         self.seen_aweme_ids: set[str] = set()
+        self._accepted_aweme_ids: set[str] = set()
         self._heap: list[HeapEntry] = []
         self._all_items: list[JsonObject] = []
 
@@ -31,9 +34,14 @@ class TopWorkCollector:
         before = self.total_count
         for item in incoming:
             aweme_id = normalize_scalar_text(item.get("aweme_id"))
-            if aweme_id is None or aweme_id in self.seen_aweme_ids:
+            if aweme_id is None:
                 continue
             self.seen_aweme_ids.add(aweme_id)
+            if aweme_id in self._accepted_aweme_ids:
+                continue
+            if not self.content_filters.matches_raw(item):
+                continue
+            self._accepted_aweme_ids.add(aweme_id)
             if self.limit is None:
                 self._all_items.append(item)
                 continue
@@ -60,10 +68,8 @@ class TopWorkCollector:
 
 
 def _ranking_key(item: JsonObject, aweme_id: str) -> RankingKey:
-    statistics = item.get("statistics")
-    stats = statistics if isinstance(statistics, dict) else item
     return (
-        _integer(stats.get("digg_count")),
+        raw_digg_count(item),
         _integer(item.get("create_time")),
         aweme_id,
     )

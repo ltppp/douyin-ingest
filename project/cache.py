@@ -6,6 +6,7 @@ from pathlib import Path
 from loguru import logger
 from pydantic import ValidationError
 
+from project.filtering import ContentFilters
 from project.models import CrawlResult
 
 
@@ -15,7 +16,9 @@ def load_cached_result(
     *,
     requested_limit: int | None,
     ttl_seconds: float,
+    content_filters: ContentFilters | None = None,
 ) -> CrawlResult | None:
+    filters = content_filters or ContentFilters()
     if ttl_seconds <= 0 or not path.is_file():
         return None
     try:
@@ -28,7 +31,9 @@ def load_cached_result(
     age = (datetime.now(UTC) - result.crawled_at).total_seconds()
     if age < 0 or age > ttl_seconds:
         return None
-    if not _cache_covers_limit(result, requested_limit):
+    if not _cache_matches_filters(result, filters):
+        return None
+    if not _cache_covers_limit(result, requested_limit, filters_active=filters.active):
         return None
     _trim_to_requested_limit(result, requested_limit)
     result.cache_hit = True
@@ -36,13 +41,25 @@ def load_cached_result(
     return result
 
 
-def _cache_covers_limit(result: CrawlResult, requested_limit: int | None) -> bool:
+def _cache_matches_filters(result: CrawlResult, filters: ContentFilters) -> bool:
+    return (
+        result.min_duration_seconds == filters.min_duration_seconds
+        and result.max_duration_seconds == filters.max_duration_seconds
+        and result.min_digg_count == filters.min_digg_count
+    )
+
+
+def _cache_covers_limit(
+    result: CrawlResult, requested_limit: int | None, *, filters_active: bool
+) -> bool:
     requested = requested_limit or 0
     cached = result.selection_limit
     if cached > 0 and len(result.videos) > cached:
         return False
     if requested == 0:
-        return cached == 0 and len(result.videos) == result.total_works
+        return cached == 0 and (filters_active or len(result.videos) == result.total_works)
+    if filters_active:
+        return cached == 0 or cached >= requested
     required_items = min(requested, result.total_works)
     if len(result.videos) < required_items:
         return False

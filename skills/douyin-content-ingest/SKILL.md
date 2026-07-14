@@ -9,7 +9,11 @@ Orchestrate the installed `douyin-*` commands. Use repository `.venv/bin/` equiv
 
 ## Workflow
 
-1. Run `douyin-doctor --json`. Parse stdout only. Check the process exit code, then `ok`, then the `login_state` check.
+1. Run the smallest matching Doctor profile and parse stdout only: `core` for metadata,
+   `media` for speech audio, and `transcribe` when raw transcripts are requested. For example,
+   `douyin-doctor --profile transcribe --json`. Check the process exit code, then `ok`, then
+   the `login_state` check. If runtime directories or Chromium are missing, run the returned
+   `fix_command` (normally `douyin-ingest setup`) and diagnose again.
 2. Choose login mode:
    - Valid saved login: add `--headless`.
    - Missing/invalid login: first try the intended command with `--headless` and no `--refresh`; a valid cache can succeed without login. If it fails for authentication, confirm the user can scan a QR code, retry without `--headless`, and wait. If no user is available, stop and provide the exact headed command. Never read or display the storage-state file.

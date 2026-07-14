@@ -5,8 +5,10 @@ Use the installed command `--help` output as the source of truth. This reference
 ## Command Matrix
 
 ```bash
-# Always diagnose first
-douyin-doctor --json
+# Diagnose the exact requested capability first
+douyin-doctor --profile core --json
+douyin-doctor --profile media --json
+douyin-doctor --profile transcribe --json
 
 # First interactive login and collection: omit --headless
 douyin-crawl 'URL' --json --limit 10
@@ -20,6 +22,10 @@ douyin-crawl 'URL' --headless --json --limit 10 \
 
 # Materialize audio and generate raw transcripts
 douyin-crawl 'URL' --headless --json --limit 10 --transcribe
+
+# Filter by content duration first, then likes, before popularity ranking
+douyin-crawl 'URL' --headless --json --limit 10 \
+  --min-duration 30 --max-duration 180 --min-digg-count 10000
 
 # Transcribe an existing local audio file
 douyin-transcribe audio.mp3 --json --model base
@@ -40,7 +46,7 @@ FFmpeg/FFprobe warnings matter only when missing audio must be generated. A fast
 
 Successful crawl output has `ok: true`, `collection_mode`, `cache_hit`, `returned_videos`, `download_headers`, and `videos[]`. `collection_mode=profile` is popularity-sorted Top N; `collection_mode=single_video` contains only the requested work. Read these video fields when present:
 
-- `name`, `digg_count`
+- `name`, `duration_seconds`, `digg_count`
 - `video_download_url`
 - `speech_audio_file`
 - `transcription.text`, `transcription.language`, `transcription.duration`

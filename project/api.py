@@ -10,6 +10,7 @@ import httpx
 from loguru import logger
 
 from project.config import Settings
+from project.filtering import ContentFilters
 from project.models import CapturedEndpoint, CollectedWorks, JsonObject, RawPage
 from project.ranking import TopWorkCollector
 from project.utils import get_by_path
@@ -46,11 +47,15 @@ class DouyinApiClient:
         self.transport = transport
 
     async def fetch_all(
-        self, endpoint: CapturedEndpoint, *, top_limit: int | None = None
+        self,
+        endpoint: CapturedEndpoint,
+        *,
+        top_limit: int | None = None,
+        content_filters: ContentFilters | None = None,
     ) -> CollectedWorks:
         headers = _prepare_headers(endpoint.headers)
         timeout = httpx.Timeout(self.settings.request_timeout_seconds)
-        collector = TopWorkCollector(top_limit)
+        collector = TopWorkCollector(top_limit, content_filters=content_filters)
         seen_cursors = _initial_cursors(endpoint)
         request_url = endpoint.url
 

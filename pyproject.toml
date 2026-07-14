@@ -19,8 +19,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+agent = [
+  "faster-whisper>=1.1,<2",
+  "python-docx>=1.1,<2",
+]
 dev = [
   "mypy>=1.10,<2",
+  "python-docx>=1.1,<2",
   "pytest>=8.2,<9",
   "pytest-asyncio>=0.23,<1",
   "ruff>=0.5,<1",
@@ -28,11 +33,15 @@ dev = [
 transcribe = [
   "faster-whisper>=1.1,<2",
 ]
+word = [
+  "python-docx>=1.1,<2",
+]
 
 [project.scripts]
 douyin-ingest = "project.main:run"
 douyin-crawl = "project.main:run"
 douyin-doctor = "project.doctor:run"
+douyin-setup = "project.setup_cli:run"
 douyin-transcribe = "project.transcribe_cli:run"
 
 [tool.hatch.build.targets.wheel]

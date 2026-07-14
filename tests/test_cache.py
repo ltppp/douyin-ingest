@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from project.cache import load_cached_result
+from project.filtering import ContentFilters
 from project.models import CrawlResult, UserProfile, Video
 
 
@@ -90,6 +91,41 @@ def test_rejects_legacy_cache_larger_than_its_selection_limit(tmp_path) -> None:
             "https://www.douyin.com/user/user",
             requested_limit=10,
             ttl_seconds=1800,
+        )
+        is None
+    )
+
+
+def test_cache_requires_identical_content_filters(tmp_path) -> None:
+    path = tmp_path / "result.json"
+    result = make_result(selection_limit=10, video_count=2)
+    result.min_duration_seconds = 30
+    result.max_duration_seconds = 180
+    result.min_digg_count = 1_000
+    write_result(path, result)
+
+    filters = ContentFilters(
+        min_duration_seconds=30,
+        max_duration_seconds=180,
+        min_digg_count=1_000,
+    )
+    cached = load_cached_result(
+        path,
+        "https://www.douyin.com/user/user",
+        requested_limit=10,
+        ttl_seconds=1800,
+        content_filters=filters,
+    )
+
+    assert cached is not None
+    assert len(cached.videos) == 2
+    assert (
+        load_cached_result(
+            path,
+            "https://www.douyin.com/user/user",
+            requested_limit=10,
+            ttl_seconds=1800,
+            content_filters=ContentFilters(min_duration_seconds=60, max_duration_seconds=180),
         )
         is None
     )

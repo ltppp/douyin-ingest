@@ -57,6 +57,7 @@ def _agent_video(video: Video) -> AgentVideo:
     return AgentVideo(
         aweme_id=video.aweme_id,
         name=video.title,
+        duration_seconds=video.duration_seconds,
         digg_count=video.digg_count,
         comment_count=video.comment_count,
         share_count=video.share_count,

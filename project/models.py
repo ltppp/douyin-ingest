@@ -90,6 +90,7 @@ class Transcription(BaseModel):
 class Video(BaseModel):
     aweme_id: str
     title: str = ""
+    duration_seconds: float | None = Field(default=None, ge=0)
     publish_time: datetime | None = None
     digg_count: int = 0
     comment_count: int = 0
@@ -118,6 +119,9 @@ class CrawlResult(BaseModel):
     top10: list[Video] = Field(default_factory=list)
     videos: list[Video] = Field(default_factory=list)
     selection_limit: int = Field(default=10, ge=0)
+    min_duration_seconds: float | None = Field(default=None, ge=0)
+    max_duration_seconds: float | None = Field(default=None, ge=0)
+    min_digg_count: int = Field(default=0, ge=0)
     cache_hit: bool = False
     download_headers: dict[str, str] = Field(default_factory=dict)
     crawled_at: datetime
@@ -126,6 +130,7 @@ class CrawlResult(BaseModel):
 class AgentVideo(BaseModel):
     aweme_id: str
     name: str
+    duration_seconds: float | None = Field(default=None, ge=0)
     digg_count: int
     comment_count: int
     share_count: int

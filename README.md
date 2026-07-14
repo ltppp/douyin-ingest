@@ -1,7 +1,75 @@
 # DouyinIngest
 
+[![skills.sh](https://skills.sh/b/ltppp/douyin-ingest)](https://skills.sh/ltppp/douyin-ingest)
+
 一个面向下游 Agent 的抖音内容采集与预处理管道，负责作品采集、热度排序、媒体提取，
 并为可选的语音转写提供标准化输入。
+
+## 快速开始
+
+### 完整 Agent 工作流（推荐）
+
+无需先克隆仓库，直接从公开 GitHub 仓库安装完整能力：
+
+```bash
+python3.12 -m venv .venv
+. .venv/bin/activate
+python -m pip install \
+  'douyin-ingest[agent] @ git+https://github.com/ltppp/douyin-ingest.git'
+douyin-ingest setup --profile agent
+douyin-ingest doctor --profile agent
+```
+
+Windows PowerShell：
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install `
+  "douyin-ingest[agent] @ git+https://github.com/ltppp/douyin-ingest.git"
+douyin-ingest setup --profile agent
+douyin-ingest doctor --profile agent
+```
+
+`setup` 创建运行目录并安装 Playwright Chromium；`doctor --profile agent` 验证采集、媒体、
+转写和 Word 交付所需能力。FFmpeg 是系统软件，Doctor 会给出当前平台的安装命令；首次转写时
+才会按需下载所选 faster-whisper 模型。
+
+安装两个通用 Agent Skills：
+
+```bash
+npx skills add https://github.com/ltppp/douyin-ingest \
+  --skill douyin-content-ingest \
+  --skill douyin-script-rewriter
+```
+
+首次运行不要加 `--headless`，浏览器会等待扫码登录：
+
+```bash
+douyin-ingest 'https://v.douyin.com/xxxx/' --json
+```
+
+### 只使用采集功能
+
+不需要转写和 Word 时安装核心包即可：
+
+```bash
+python -m pip install \
+  'douyin-ingest @ git+https://github.com/ltppp/douyin-ingest.git'
+douyin-ingest setup --profile core
+douyin-ingest doctor --profile core
+```
+
+### 源码开发
+
+```bash
+git clone https://github.com/ltppp/douyin-ingest.git
+cd douyin-ingest
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -e '.[dev,agent]'
+.venv/bin/douyin-ingest setup --profile agent
+.venv/bin/douyin-ingest doctor --profile agent
+```
 
 ## 架构
 
@@ -32,6 +100,10 @@ Python 3.12 或更高版本。
 - **可选转写依赖**：`faster-whisper`（及其 CTranslate2 依赖）只存在于 `transcribe` extra；
   `pip install -e .` 不会安装它、下载模型或改变核心采集环境。需要转写时显式执行
   `pip install -e '.[transcribe]'`。
+- **可选 Word 依赖**：`python-docx` 只存在于 `word` extra；固定模板 Word 生成使用
+  `pip install -e '.[word]'`。
+- **完整 Agent 依赖**：`agent` extra 同时包含 `transcribe` 与 `word` 能力；使用
+  `pip install -e '.[agent]'`。它仍不会安装 FFmpeg、Chromium 或转写模型。
 
 macOS / Linux 开发环境：
 
@@ -57,60 +129,70 @@ FFmpeg 与 FFprobe 由同一个 FFmpeg 软件包提供：
 | Ubuntu / Debian | `sudo apt-get update && sudo apt-get install -y ffmpeg` |
 | Windows（winget） | `winget install --id Gyan.FFmpeg -e` |
 
-## 环境诊断
+## Setup 与环境诊断
 
-安装项目后运行独立诊断命令；它不会修改环境：
+`setup` 是幂等的首次初始化命令。重复运行不会删除状态、输出或模型：
 
 ```bash
-.venv/bin/douyin-doctor
-.venv/bin/douyin-doctor --json
+douyin-ingest setup --profile agent
+# 等价独立入口
+douyin-setup --profile agent
 ```
 
-Windows 使用 `.venv\Scripts\douyin-doctor.exe`。Doctor 检查 Python 版本、每个核心包、
-Playwright Chromium、`ffmpeg`、`ffprobe`、`storage/storage_state.json` 中的有效登录 cookie，
-以及可选转写所需的 `faster-whisper`。Python、核心包和 Chromium 是必需项；媒体工具、已保存
-登录状态和转写包是按功能启用的可选项。只有必需项失败时命令才返回非零退出码。
+使用 `--skip-browser` 只创建 `storage/`、`output/`、`logs/` 和模型缓存目录；Linux 可显式添加
+`--with-deps`，让 Playwright 在安装 Chromium 时同时请求系统浏览器依赖。Setup 不安装 FFmpeg、
+不下载 Whisper 模型，也不读取登录凭据。
 
-`--json` 的 stdout 是稳定、紧凑的单个 JSON 对象。每个 `checks[]` 项都包含 `id`、`status`
-（`pass` / `warn` / `fail`）、`version`、`required`、`message` 和可直接执行的
-`fix_command`；无需修复时命令为 `null`：
+Doctor 只读检查环境，并按实际用途决定哪些能力是必需项：
 
-```json
-{"schema_version":"1.0","ok":true,"platform":"macos","python_executable":"...","summary":{"pass":9,"warn":2,"fail":0},"checks":[{"id":"ffmpeg","label":"ffmpeg","status":"pass","required":false,"version":"ffmpeg version 8.1 ...","message":"Executable found: /opt/homebrew/bin/ffmpeg","fix_command":null}]}
+| Profile | 必需能力 |
+| --- | --- |
+| `core` | Python 3.12、核心包、运行目录、Chromium |
+| `media` | `core` + FFmpeg / FFprobe |
+| `transcribe` | `media` + faster-whisper |
+| `word` | Python、核心包、运行目录、python-docx；Chromium 仅提示 |
+| `agent` | `core` + FFmpeg / FFprobe + faster-whisper + python-docx |
+
+```bash
+douyin-ingest doctor --profile agent
+douyin-ingest doctor --profile agent --json
+# 等价独立入口
+douyin-doctor --profile agent --json
 ```
+
+登录状态始终单独报告为警告而不是安装失败：公开单视频和有效缓存可能无需登录，主页首次采集则
+按提示扫码。`--json` 的 stdout 是单个 JSON 对象；schema `1.1` 包含 `profile`、
+`runtime_root`、汇总和逐项 `fix_command`。
 
 源码/editable 安装默认把状态写在仓库的 `storage/`、`output/` 和 `logs/`。普通 wheel 安装改用
 用户数据目录，避免写入 `site-packages`；可设置 `DOUYIN_INGEST_HOME=/path/to/data` 显式指定根目录。
 
-## Codex Skill
+## Agent Skills
 
-仓库包含可分发 Skill：`skills/douyin-content-ingest/`。从仓库根目录复制安装到 Codex：
+仓库提供两个符合 Agent Skills 开放目录结构的 Skill：
 
-```bash
-mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
-cp -R skills/douyin-content-ingest "${CODEX_HOME:-$HOME/.codex}/skills/"
-```
+- `douyin-content-ingest`：主页/单视频采集、Top N、媒体和原始转写。
+- `douyin-script-rewriter`：AI 校正版逐字稿、原创改写和固定模板 Word 交付。
 
-开发时可使用符号链接，让仓库修改立即生效：
+查看或安装：
 
 ```bash
-mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
-ln -sfn "$(pwd)/skills/douyin-content-ingest" \
-  "${CODEX_HOME:-$HOME/.codex}/skills/douyin-content-ingest"
+npx skills add https://github.com/ltppp/douyin-ingest --list
+npx skills add https://github.com/ltppp/douyin-ingest \
+  --skill douyin-content-ingest \
+  --skill douyin-script-rewriter
 ```
 
-Windows PowerShell 可创建目录联接：
+个人全局安装到 Claude Code 与 Codex：
 
-```powershell
-$homeDir = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { "$HOME/.codex" }
-New-Item -ItemType Directory -Force "$homeDir/skills" | Out-Null
-New-Item -ItemType Junction -Force `
-  "$homeDir/skills/douyin-content-ingest" `
-  (Resolve-Path "skills/douyin-content-ingest")
+```bash
+npx skills add https://github.com/ltppp/douyin-ingest \
+  -g -a claude-code -a codex \
+  --skill douyin-content-ingest \
+  --skill douyin-script-rewriter
 ```
 
-安装后可用 `$douyin-content-ingest` 显式调用；其触发范围包括抖音主页 Top N、口播音频、
-原始转写稿和内容分析素材准备。
+Skills 只安装 Agent 指令、脚本和模板，不会代替上面的 Python/Chromium/FFmpeg 安装。
 
 ## 运行
 
@@ -197,6 +279,11 @@ New-Item -ItemType Junction -Force `
 .venv/bin/douyin-ingest 'https://v.douyin.com/xxxx/' \
   --headless --json --limit 50 --min-digg-count 10000
 
+# 先保留 30–180 秒且点赞数不低于 10000 的作品，再按点赞数取前 50 条
+.venv/bin/douyin-ingest 'https://v.douyin.com/xxxx/' \
+  --headless --json --limit 50 --min-duration 30 --max-duration 180 \
+  --min-digg-count 10000
+
 # 忽略 30 分钟结果缓存，强制刷新点赞数
 .venv/bin/douyin-ingest 'https://v.douyin.com/xxxx/' --headless --json --refresh
 
@@ -215,6 +302,10 @@ New-Item -ItemType Junction -Force `
 缓存命中时不会启动浏览器或请求作品分页。可用 `--cache-ttl 0` 禁用缓存，或用
 `--page-delay-min/--page-delay-max` 调整节流范围。
 
+`--min-duration` 与 `--max-duration` 的单位都是秒，边界值会保留。启用时长和点赞阈值后，
+处理顺序固定为：先按内容时长过滤，再按 `--min-digg-count` 过滤，最后按点赞数降序取
+`--limit` 条。缺少时长数据的作品在启用时长过滤时不会进入候选集。
+
 进程退出码非零表示失败；JSON 模式下失败也会返回稳定结构：
 
 ```json
@@ -226,6 +317,7 @@ New-Item -ItemType Junction -Force `
 - `aweme_id`
 - `name`
 - `digg_count`、`comment_count`、`share_count`、`collect_count`
+- `duration_seconds`
 - `page_url`
 - `video_download_url`
 - `audio_download_url`、`audio_title`、`audio_kind`
